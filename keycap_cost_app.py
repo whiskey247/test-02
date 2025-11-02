@@ -2,11 +2,11 @@ import streamlit as st
 import pandas as pd
 
 # -----------------------------
-# Configuration
+# Constants
 # -----------------------------
 USD_TO_INR = 90.51799464
 
-# Product data (base values)
+# Base product data
 data = [
     ["Crystal Machinery Keycaps", 24.50],
     ["Multi-color PBT Keycaps – Blue", 4.20],
@@ -30,9 +30,9 @@ data = [
 df = pd.DataFrame(data, columns=["Product", "Base USD"])
 
 # -----------------------------
-# Sidebar – adjustable parameters
+# Sidebar – adjustable global values
 # -----------------------------
-st.sidebar.header("Adjust Extra Costs (USD / INR)")
+st.sidebar.header("⚙️ Adjust Extra Costs (USD / INR)")
 
 shipping = st.sidebar.number_input("Shipping (USD)", value=85.0, step=1.0)
 fees = st.sidebar.number_input("Fees (USD)", value=6.67, step=0.5)
@@ -40,34 +40,70 @@ extra_inr_1 = st.sidebar.number_input("Extra 1 (INR)", value=360.62, step=10.0)
 extra_inr_2 = st.sidebar.number_input("Extra 2 (INR)", value=242.24, step=10.0)
 delivery_inr = st.sidebar.number_input("Delivery (INR)", value=4680.0, step=50.0)
 
-# Convert INR extras to USD
 extra_usd = (extra_inr_1 + extra_inr_2 + delivery_inr) / USD_TO_INR
 
 # -----------------------------
-# Core calculation
+# Product Editing Section
 # -----------------------------
-total_product_usd = df["Base USD"].sum()
-total_extras_usd = shipping + fees + extra_usd
-ratio = 1 + (total_extras_usd / total_product_usd)
+st.title("💻 Adjustable Product Cost Distributor (Smart Mode)")
 
-df["Final USD"] = df["Base USD"] * ratio
+st.write("""
+You can edit each product price directly.  
+Mark items as **fixed** if you don’t want them to change when ratios adjust.  
+Other prices will rebalance automatically to keep total cost constant.
+""")
+
+# Editable table
+df["Editable USD"] = st.experimental_data_editor(
+    df["Base USD"],
+    key="editable_prices",
+    num_rows="fixed",
+    use_container_width=True
+)
+
+# Fixed items selection
+fixed_items = st.multiselect(
+    "🔒 Select products to keep fixed:",
+    options=df["Product"].tolist(),
+    default=[]
+)
+
+# -----------------------------
+# Core Calculation Logic
+# -----------------------------
+total_product_usd = df["Editable USD"].sum()
+total_extra_usd = shipping + fees + extra_usd
+total_usd = total_product_usd + total_extra_usd
+
+# If some products are fixed, adjust others proportionally
+df["Final USD"] = df["Editable USD"]
+
+if fixed_items:
+    fixed_sum = df[df["Product"].isin(fixed_items)]["Editable USD"].sum()
+    variable_sum = total_product_usd - fixed_sum
+    new_variable_total = variable_sum + total_extra_usd
+    if variable_sum > 0:
+        ratio = new_variable_total / variable_sum
+        df.loc[~df["Product"].isin(fixed_items), "Final USD"] *= ratio
+    else:
+        ratio = 1
+else:
+    ratio = 1 + (total_extra_usd / total_product_usd)
+    df["Final USD"] = df["Editable USD"] * ratio
+
 df["Final INR"] = df["Final USD"] * USD_TO_INR
-
-# Totals
-total_usd = df["Final USD"].sum()
-total_inr = df["Final INR"].sum()
 
 # -----------------------------
 # Display
 # -----------------------------
-st.title("💻 Keyboard Keycap Cost Distributor")
-st.write("Adjust shipping, fees, and delivery charges — values update instantly while keeping totals balanced.")
+st.subheader("📊 Results")
 
-st.metric("Current Ratio (Multiplier)", f"{ratio:.4f}")
-st.metric("Grand Total (INR)", f"₹{total_inr:,.2f}")
+st.metric("Current Ratio", f"{ratio:.4f}")
+st.metric("Grand Total (USD)", f"${df['Final USD'].sum():,.2f}")
+st.metric("Grand Total (INR)", f"₹{df['Final INR'].sum():,.2f}")
 
 st.dataframe(df.style.format({
-    "Base USD": "{:.2f}",
+    "Editable USD": "{:.2f}",
     "Final USD": "{:.2f}",
     "Final INR": "₹{:.2f}"
 }))
@@ -79,4 +115,5 @@ excel = df.copy()
 excel["USD→INR rate"] = USD_TO_INR
 
 excel_bytes = excel.to_excel(index=False, engine="openpyxl")
-st.download_button("📥 Download Excel", data=excel_bytes, file_name="keycaps_cost_distribution.xlsx")
+st.download_button("📥 Download Updated Excel", data=excel_bytes, file_name="keycap_cost_dashboard.xlsx")
+
